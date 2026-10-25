@@ -1,0 +1,46 @@
+{
+ "built_at_utc": "2026-10-25T11:25:18.530468+00:00",
+ "rate": 7.3,
+ "sources": {
+  "basellm:volcengine": {
+   "fetched": 12,
+   "kept": 12
+  },
+  "basellm:minimax-cn": {
+   "fetched": 11,
+   "kept": 10
+  },
+  "basellm:moonshotai-cn": {
+   "fetched": 6,
+   "kept": 5
+  },
+  "basellm:stepfun": {
+   "fetched": 4,
+   "kept": 3
+  },
+  "local:zhipu": {
+   "built": 33,
+   "overrides": 0
+  },
+  "local:aliyun": {
+   "built": 37,
+   "overrides": 4
+  },
+  "local:deepseek": {
+   "built": 2,
+   "overrides": 0
+  }
+ },
+ "conflicts": [
+  "glm-5.3",
+  "glm-5.2",
+  "glm-5.1",
+  "glm-5"
+ ],
+ "dropped": [
+  "minimax-cn:MiniMax-M3.1-Flash",
+  "moonshotai-cn:kimi-k3.1-pro-highspeed",
+  "stepfun:step-5-preview"
+ ],
+ "total_models": 98
+}

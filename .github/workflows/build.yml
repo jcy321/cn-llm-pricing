@@ -1,0 +1,60 @@
+name: build-and-deploy
+
+on:
+  schedule:
+    # UTC 22:00 = 北京时间 06:00，官方调价一般白天发布，次日凌晨同步
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'build.py'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build unified price source
+        run: python3 build.py --unified
+
+      - name: Commit rebuilt dist
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dist/
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "chore: rebuild pricing $(date -u +%F)"
+            git push origin HEAD:main
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

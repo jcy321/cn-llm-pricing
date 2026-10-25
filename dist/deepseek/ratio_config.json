@@ -1,0 +1,14 @@
+{
+ "success": true,
+ "message": "",
+ "data": {
+  "billing_expr": {
+   "deepseek-flash": "weekday(\"UTC\") >= 1 && weekday(\"UTC\") <= 5 && ((hour(\"UTC\") >= 1 && hour(\"UTC\") < 4) || (hour(\"UTC\") >= 6 && hour(\"UTC\") < 10)) ? tier(\"peak\", p * 0.2739726027 + cr * 0.0054794521 + cc * 0 + c * 1.095890411) : tier(\"off_peak\", p * 0.1369863014 + cr * 0.002739726 + cc * 0 + c * 0.5479452055)",
+   "deepseek-v4-pro": "weekday(\"UTC\") >= 1 && weekday(\"UTC\") <= 5 && ((hour(\"UTC\") >= 1 && hour(\"UTC\") < 4) || (hour(\"UTC\") >= 6 && hour(\"UTC\") < 10)) ? tier(\"peak\", p * 1.2328767123 + cr * 0.0410958904 + cc * 0 + c * 3.698630137) : tier(\"off_peak\", p * 0.6164383562 + cr * 0.0205479452 + cc * 0 + c * 1.8493150685)"
+  },
+  "billing_mode": {
+   "deepseek-flash": "tiered_expr",
+   "deepseek-v4-pro": "tiered_expr"
+  }
+ }
+}
