@@ -1,46 +1,92 @@
 {
- "built_at_utc": "2026-10-28T00:48:36.825908+00:00",
+ "built_at_utc": "2026-10-28T21:39:52.439180+00:00",
  "rate": 7.3,
  "sources": {
-  "basellm:volcengine": {
+  "usd:zai": {
+   "fetched": 18,
+   "kept": 18
+  },
+  "usd:alibaba": {
+   "fetched": 49,
+   "kept": 49
+  },
+  "usd:moonshotai": {
+   "fetched": 6,
+   "kept": 6
+  },
+  "usd:minimax": {
+   "fetched": 10,
+   "kept": 10
+  },
+  "usd:volcengine": {
    "fetched": 12,
    "kept": 12
   },
-  "basellm:minimax-cn": {
-   "fetched": 11,
-   "kept": 10
-  },
-  "basellm:moonshotai-cn": {
-   "fetched": 6,
-   "kept": 5
-  },
-  "basellm:stepfun": {
+  "usd:stepfun": {
    "fetched": 4,
-   "kept": 3
+   "kept": 4
   },
-  "local:zhipu": {
+  "usd:deepseek": {
+   "fetched": 4,
+   "kept": 4
+  },
+  "usd:openai": {
+   "fetched": 48,
+   "kept": 48
+  },
+  "usd:anthropic": {
+   "fetched": 17,
+   "kept": 17
+  },
+  "usd:google": {
+   "fetched": 36,
+   "kept": 36
+  },
+  "usd:xai": {
+   "fetched": 8,
+   "kept": 8
+  },
+  "usd:mistral": {
+   "fetched": 32,
+   "kept": 32
+  },
+  "usd:cohere": {
+   "fetched": 12,
+   "kept": 12
+  },
+  "usd:meta": {
+   "fetched": 6,
+   "kept": 6
+  },
+  "cny:zhipu": {
    "built": 33,
-   "overrides": 0
+   "skipped_dup": 0
   },
-  "local:aliyun": {
-   "built": 37,
-   "overrides": 4
+  "cny:kimi": {
+   "built": 6,
+   "skipped_dup": 0
   },
-  "local:deepseek": {
+  "cny:minimax": {
    "built": 2,
-   "overrides": 0
+   "skipped_dup": 0
+  },
+  "cny:stepfun": {
+   "built": 5,
+   "skipped_dup": 0
+  },
+  "cny:deepseek": {
+   "built": 2,
+   "skipped_dup": 0
+  },
+  "cny:aliyun": {
+   "built": 37,
+   "skipped_dup": 4
   }
  },
- "conflicts": [
-  "glm-5.3",
-  "glm-5.2",
-  "glm-5.1",
-  "glm-5"
- ],
- "dropped": [
-  "minimax-cn:MiniMax-M3.1-Flash",
-  "moonshotai-cn:kimi-k3.1-pro-highspeed",
-  "stepfun:step-5-preview"
- ],
- "total_models": 98
+ "usd_models": 262,
+ "cny_models": 81,
+ "currency_map": {
+  "CNY": 81,
+  "USD": 213
+ }
 }

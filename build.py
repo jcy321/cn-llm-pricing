@@ -201,7 +201,11 @@ def extract_model_id(text):
 
 
 def coeff(cny):
-    return round(cny / RATE, 10)
+    """表达式系数直接使用官方人民币原值（元/百万 tokens），不做汇率换算。
+
+    newapi 侧按模型币种在扣费时折算，展示时原样输出，因此源里存的就是官方数字。
+    """
+    return round(cny, 10)
 
 
 def fmt(n):
@@ -241,12 +245,13 @@ def build_tiered_expr(tiers, thinking_toggle=False):
     def tier_chain(tier_fn):
         if len(tiers) == 1:
             return tier_fn(tiers[0], "standard")
+        # 从末档往前拼：末档（range=None）兜底，其余按"len <= 上界"判断
         expr = None
         for i in range(len(tiers) - 1, -1, -1):
             t = tiers[i]
             upper = t["range"]
-            name = f"tier_{i}_{upper}"
-            body = tier_fn(t, name)
+            label = "plus" if upper is None else str(upper)
+            body = tier_fn(t, f"tier_{i}_{label}")
             if expr is None:
                 expr = body
             else:
@@ -637,17 +642,213 @@ def build_zhipu():
 
 
 # ----------------------------------------------------------------------------
-# 统一国模源：聚合 basellm per-provider 端点 + 本地自建
+# Kimi（官方定价页：表格数据在流式 JSON 里）
 # ----------------------------------------------------------------------------
 
-# basellm 已验证"官方人民币价 ÷ 7.3 精确闭环"的供应商（系数 6 位精度，
-# 展示层 4 位小数四舍五入后闭环）。
-BASELLM_CLOSED_LOOP_PROVIDERS = [
-    "volcengine",  # 火山豆包
-    "minimax-cn",  # MiniMax
-    "moonshotai-cn",  # Kimi
-    "stepfun",  # 阶跃
+KIMI_PRICING_URL = "https://platform.kimi.com/docs/pricing/chat"
+
+
+def build_kimi():
+    html = fetch(KIMI_PRICING_URL)
+    # 页面把表格 data 塞进 self.__next_f.push([1,"..."]) 的流式片段
+    chunks = re.findall(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', html, re.S)
+    if not chunks:
+        raise RuntimeError("kimi: no __next_f chunks found")
+    blob = "".join(chunks).replace('\\"', '"').replace("\\n", "\n")
+
+    exprs = {}
+    # 每个表格: rows:[[_jsx(...children:`model`) ,`¥x / MTok`,`¥y / MTok`,`¥z / MTok`,`¥w / MTok`,`¥v / MTok`], ...]
+    for block in re.finditer(r"rows:\[\[(.*?)\]\]\}", blob, re.S):
+        body = block.group(1)
+        for row_text in re.split(r"\],\s*\[", body):
+            row_text = row_text.strip("[]")
+            name_m = re.search(r"children:`([A-Za-z0-9][A-Za-z0-9._\-]*)`", row_text)
+            if not name_m:
+                continue
+            name = name_m.group(1)
+            if not name.startswith("kimi-"):
+                continue
+            prices = [float(x) for x in re.findall(r"¥([\d.]+) / MTok", row_text)]
+            # 列顺序：输入(未命中) 输出 缓存命中 缓存写入5min 缓存写入1h
+            if len(prices) < 3:
+                continue
+            p_in, p_out, p_cache = prices[0], prices[1], prices[2]
+            cc5 = prices[3] if len(prices) > 3 else 0.0
+            cc1h = prices[4] if len(prices) > 4 else 0.0
+            terms = [
+                f"p * {fmt(p_in)}",
+                f"cr * {fmt(p_cache)}",
+                f"cc * {fmt(cc5)}",
+            ]
+            if cc1h:
+                terms.append(f"cc1h * {fmt(cc1h)}")
+            terms.append(f"c * {fmt(p_out)}")
+            exprs[name] = 'tier("standard", ' + " + ".join(terms) + ")"
+
+    if not exprs:
+        raise RuntimeError("no kimi models parsed")
+    return {"billing_expr": exprs}
+
+
+# ----------------------------------------------------------------------------
+# MiniMax（官方定价页 Markdown 表格）
+# ----------------------------------------------------------------------------
+
+MINIMAX_PRICING_URL = "https://platform.minimax.cn/docs/pricing/overview.md"
+
+
+def build_minimax():
+    md = fetch(MINIMAX_PRICING_URL)
+    exprs = {}
+    in_language_section = False
+    skip_block = False  # "优先"档按标准价 1.5 倍，表达式无法区分，跳过
+
+    for raw in md.splitlines():
+        line = raw.strip()
+        if line.startswith("## "):
+            in_language_section = "语言模型" in line
+            continue
+        if not line.startswith("|"):
+            # 档位标题：**标准** / **优先**
+            if "优先" in line:
+                skip_block = True
+            elif "标准" in line:
+                skip_block = False
+            continue
+        if not in_language_section or skip_block:
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 4:
+            continue
+        # 跳表头/分隔行
+        if "模型" in cells[0] or set(cells[0]) <= {"-", ":", " "}:
+            continue
+
+        # 模型名去掉 ** 和档位后缀；价格列取最终价（删除线后那个）
+        raw_name = re.sub(r"\*+", "", cells[0]).strip()
+        name_m = re.match(r"(MiniMax-[A-Za-z0-9.\-]+)", raw_name)
+        if not name_m:
+            continue
+        name = name_m.group(1)
+
+        def final_price(cell):
+            # "~~4.20~~ 2.10" -> 2.10
+            cleaned = re.sub(r"~~[^~]*~~", "", cell).strip()
+            m = re.search(r"([\d.]+)", cleaned)
+            return float(m.group(1)) if m else None
+
+        p_in = final_price(cells[1])
+        p_out = final_price(cells[2])
+        p_cache = final_price(cells[3]) if len(cells) > 3 else None
+        if p_in is None or p_out is None:
+            continue
+
+        upper = None
+        is_last_tier = False
+        if "512k" in raw_name:
+            if "≤" in raw_name:
+                upper = 512000
+            else:
+                is_last_tier = True
+        cache = p_cache if p_cache is not None else p_in * 0.2
+
+        tier = {"range": upper, "input": p_in, "output": p_out, "cache": cache}
+        entry = exprs.get(name)
+        if not is_last_tier and upper is None:
+            if entry is None:
+                exprs[name] = {"tiers": [tier]}
+        else:
+            if entry is None:
+                exprs[name] = {"tiers": []}
+                entry = exprs[name]
+            entry["tiers"].append(tier)
+
+    result = {}
+    for name, entry in exprs.items():
+        tiers = sorted(entry["tiers"], key=lambda t: (t["range"] is None, t["range"] or 0))
+        if not tiers:
+            continue
+        result[name] = build_tiered_expr(tiers)
+
+    if not result:
+        raise RuntimeError("no minimax models parsed")
+    return {"billing_expr": result}
+
+
+# ----------------------------------------------------------------------------
+# 阶跃（官方定价页 Markdown 表格）
+# ----------------------------------------------------------------------------
+
+STEPFUN_PRICING_URL = "https://platform.stepfun.com/docs/zh/guides/pricing/details.md"
+
+
+def build_stepfun():
+    md = fetch(STEPFUN_PRICING_URL)
+    exprs = {}
+    in_text_section = False
+
+    for raw in md.splitlines():
+        line = raw.strip()
+        if line.startswith("## "):
+            in_text_section = "文本与多模态模型" in line
+            continue
+        if not in_text_section or not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 4:
+            continue
+        name_m = re.match(r"`?([A-Za-z0-9][A-Za-z0-9._\-]*)`?", cells[0])
+        if not name_m:
+            continue
+        name = name_m.group(1)
+        if name.lower() in ("model id",) or set(cells[0]) <= {"-", ":", " "}:
+            continue
+        try:
+            p_in = float(cells[1])
+            p_cache = float(cells[2])
+            p_out = float(cells[3])
+        except ValueError:
+            continue
+        exprs[name] = (
+            'tier("standard", '
+            + f"p * {fmt(p_in)} + cr * {fmt(p_cache)} + cc * 0 + c * {fmt(p_out)})"
+        )
+
+    if not exprs:
+        raise RuntimeError("no stepfun models parsed")
+    return {"billing_expr": exprs}
+
+
+# ----------------------------------------------------------------------------
+# 统一源：美元价取内置源（官方国际站价）+ 人民币价取自建（官方中国站价）
+# ----------------------------------------------------------------------------
+
+# 内置源里需要收录的 provider（全部为官方美元价）
+# 国模的国际站 provider 与国内站 provider 用的是不同模型名，因此美元段与人民币段
+# 各自独立存放，互不覆盖。
+BASELLM_USD_PROVIDERS = [
+    # 国模的国际站（官方美元价）
+    "zai",          # 智谱国际
+    "alibaba",      # 阿里国际
+    "moonshotai",   # Kimi 国际
+    "minimax",      # MiniMax 国际
+    "volcengine",   # 火山（暂无人民币自建源，仅有美元段）
+    "stepfun",      # 阶跃
+    "deepseek",     # DeepSeek
+    # 外模
+    "openai",
+    "anthropic",
+    "google",
+    "xai",
+    "mistral",
+    "cohere",
+    "meta",
 ]
+
+# 人民币自建源（官方中国站人民币原价）。
+# 顺序即优先级：厂商自己的官方站优先，转售平台（百炼）靠后，
+# 否则百炼转售的 GLM 缓存价会覆盖智谱官方价。
+LOCAL_CNY_PROVIDERS = ["zhipu", "kimi", "minimax", "stepfun", "deepseek", "aliyun"]
 
 BASELLM_PROVIDER_URL = (
     "https://basellm.github.io/llm-metadata/api/newapi/providers"
@@ -667,20 +868,12 @@ def fetch_basellm(provider):
     return exprs
 
 
-def passes_weak_audit(expr):
-    """basellm 系数一旦是第三方换算美元价，×7.3 会得到 3 位以上小数。"""
-    for mm in re.finditer(r"(?<![a-z])(p|cr|c) \* ([\d.]+)", expr):
-        cny = float(mm.group(2)) * RATE
-        if abs(cny - round(cny, 2)) > 0.001:
-            return False
-    return True
-
-
 def build_unified():
-    """合并自建源（阿里、DeepSeek，已闭环审计）与 basellm 五家闭环源。
+    """生成单一合并源：
 
-    同名冲突时自建源覆盖（本地抓官方页并做过闭环审计，可信度更高），
-    冲突明细记录进 manifest 供人工复核。
+    - usd_billing_expr:   各厂商官方美元价（内置源，含国模国际站与外模）
+    - cny_billing_expr:   国模官方人民币价（自建，从官方中国站定价页抓取）
+    - currency:           每个模型的原始币种（决定模型广场显示哪种货币）
     """
     manifest = {
         "built_at_utc": __import__("datetime")
@@ -688,49 +881,58 @@ def build_unified():
         .isoformat(),
         "rate": RATE,
         "sources": {},
-        "conflicts": [],
-        "dropped": [],
+        "usd_models": 0,
+        "cny_models": 0,
+        "currency_map": {},
     }
-    merged_exprs = {}
-    merged_modes = {}
 
-    # basellm 先进（兜底数据）
-    for provider in BASELLM_CLOSED_LOOP_PROVIDERS:
-        exprs = fetch_basellm(provider)
-        count = 0
+    usd_exprs = {}
+    for provider in BASELLM_USD_PROVIDERS:
+        try:
+            exprs = fetch_basellm(provider)
+        except Exception as exc:  # noqa: BLE001
+            manifest["sources"][f"usd:{provider}"] = {"error": str(exc)}
+            continue
+        kept = 0
         for m, e in exprs.items():
-            if not passes_weak_audit(e):
-                manifest["dropped"].append(f"{provider}:{m}")
-                continue
-            if m not in merged_exprs:
-                merged_exprs[m] = e
-                merged_modes[m] = "tiered_expr"
-                count += 1
-        manifest["sources"][f"basellm:{provider}"] = {
-            "fetched": len(exprs),
-            "kept": count,
-        }
+            if m not in usd_exprs:
+                usd_exprs[m] = e
+                kept += 1
+        manifest["sources"][f"usd:{provider}"] = {"fetched": len(exprs), "kept": kept}
 
-    # 自建源覆盖（优先）
-    local_results = {}
-    for name in ("zhipu", "aliyun", "deepseek"):
-        data = PROVIDERS[name]()
-        local_results[name] = data
+    cny_exprs = {}
+    for name in LOCAL_CNY_PROVIDERS:
+        builder = PROVIDERS.get(name)
+        if builder is None:
+            continue
+        data = builder()
         exprs = data["billing_expr"]
         overridden = 0
         for m, e in exprs.items():
-            if m in merged_exprs:
+            if m in cny_exprs:
                 overridden += 1
-                if merged_exprs[m] != e:
-                    manifest["conflicts"].append(m)
-            merged_exprs[m] = e
-            merged_modes[m] = "tiered_expr"
-        manifest["sources"][f"local:{name}"] = {
+                continue
+            cny_exprs[m] = e
+        manifest["sources"][f"cny:{name}"] = {
             "built": len(exprs),
-            "overrides": overridden,
+            "skipped_dup": overridden,
         }
 
-    return merged_exprs, merged_modes, manifest, local_results
+    manifest["usd_models"] = len(usd_exprs)
+    manifest["cny_models"] = len(cny_exprs)
+
+    # 原始币种：有人民币官方价的模型视为国模（显示人民币），其余为美元
+    currency = {}
+    for m in usd_exprs:
+        currency[m] = "CNY" if m in cny_exprs else "USD"
+    for m in cny_exprs:
+        currency.setdefault(m, "CNY")
+    manifest["currency_map"] = {
+        "CNY": sum(1 for v in currency.values() if v == "CNY"),
+        "USD": sum(1 for v in currency.values() if v == "USD"),
+    }
+
+    return usd_exprs, cny_exprs, currency, manifest
 
 
 # ----------------------------------------------------------------------------
@@ -741,6 +943,9 @@ PROVIDERS = {
     "deepseek": build_deepseek,
     "aliyun": build_aliyun,
     "zhipu": build_zhipu,
+    "minimax": build_minimax,
+    "kimi": build_kimi,
+    "stepfun": build_stepfun,
 }
 
 # 页面改版导致静默残缺时的下限保护
@@ -748,24 +953,27 @@ MIN_MODELS = {"deepseek": 2, "aliyun": 25}
 
 
 def verify_exprs(exprs):
-    """审计：每个价格系数 × 汇率应还原成官方人民币价（≤2 位小数）。"""
+    """审计：系数直接是官方原价，只校验非负与可解析。"""
     suspicious = []
     for model, expr in exprs.items():
-        for mm in re.finditer(r"(?<![a-z])(p|cr|c) \* ([\d.]+)", expr):
-            cny = float(mm.group(2)) * RATE
-            if abs(cny - round(cny, 2)) > 0.001:
-                suspicious.append((model, mm.group(1), cny))
+        for mm in re.finditer(r"(?<![a-z])(p|cr|cc1h|cc|c) \* ([\d.]+)", expr):
+            val = float(mm.group(2))
+            if val < 0:
+                suspicious.append((model, mm.group(1), val))
     return suspicious
 
 
-def write_ratio_config(path, exprs, modes):
+def write_ratio_config(path, exprs, modes, data_extra=None):
+    data = {
+        "billing_expr": exprs,
+        "billing_mode": modes,
+    }
+    if data_extra:
+        data.update(data_extra)
     payload = {
         "success": True,
         "message": "",
-        "data": {
-            "billing_expr": exprs,
-            "billing_mode": modes,
-        },
+        "data": data,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -794,39 +1002,29 @@ def main():
     out_dir = Path(__file__).parent / "dist"
 
     if args.unified:
-        exprs, modes, manifest, local = build_unified()
-        write_ratio_config(out_dir / "ratio_config.json", exprs, modes)
-        # 各源单独文件便于排查
-        for name, data in local.items():
-            write_ratio_config(
-                out_dir / name / "ratio_config.json",
-                data["billing_expr"],
-                {m: "tiered_expr" for m in data["billing_expr"]},
-            )
-        manifest["total_models"] = len(exprs)
+        usd_exprs, cny_exprs, currency, manifest = build_unified()
+        write_ratio_config(
+            out_dir / "ratio_config.json",
+            usd_exprs,
+            {m: "tiered_expr" for m in usd_exprs},
+            data_extra={
+                "cny_billing_expr": cny_exprs,
+                "currency": currency,
+            },
+        )
         (out_dir / "manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
             encoding="utf-8",
         )
         print(
-            f"unified: {len(exprs)} models -> {out_dir / 'ratio_config.json'}"
+            f"unified: {len(usd_exprs)} USD models, {len(cny_exprs)} CNY models "
+            f"-> {out_dir / 'ratio_config.json'}"
         )
-        if manifest["conflicts"]:
-            print(
-                "conflicts (local overrode basellm with a different "
-                f"expression): {', '.join(manifest['conflicts'])}",
-                file=sys.stderr,
-            )
-        suspicious = verify_exprs(exprs)
-        if suspicious:
-            print(
-                f"WARNING: {len(suspicious)} coefficients do not round-trip:",
-                file=sys.stderr,
-            )
-            for model, var, cny in suspicious[:10]:
-                print(f"  {model}: {var} -> ¥{cny:.6f}", file=sys.stderr)
+        bad_cny = verify_exprs(cny_exprs)
+        if bad_cny:
+            print(f"WARNING: {len(bad_cny)} CNY coefficients invalid", file=sys.stderr)
         else:
-            print(f"  closed-loop check: all {len(exprs)} models OK")
+            print(f"  CNY price check: all {len(cny_exprs)} models OK")
         return
 
     names = list(PROVIDERS) if not args.providers or "all" in args.providers else args.providers
