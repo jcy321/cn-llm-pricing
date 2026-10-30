@@ -1,5 +1,5 @@
 {
- "built_at_utc": "2026-10-29T01:21:33.455502+00:00",
+ "built_at_utc": "2026-10-30T01:25:05.317845+00:00",
  "rate": 7.3,
  "sources": {
   "usd:zai": {
@@ -39,16 +39,16 @@
    "kept": 17
   },
   "usd:google": {
-   "fetched": 36,
-   "kept": 36
+   "fetched": 34,
+   "kept": 34
   },
   "usd:xai": {
    "fetched": 8,
    "kept": 8
   },
   "usd:mistral": {
-   "fetched": 32,
-   "kept": 32
+   "fetched": 33,
+   "kept": 33
   },
   "usd:cohere": {
    "fetched": 12,
@@ -79,14 +79,14 @@
    "skipped_dup": 0
   },
   "cny:aliyun": {
-   "built": 37,
+   "built": 32,
    "skipped_dup": 4
   }
  },
- "usd_models": 262,
- "cny_models": 81,
+ "usd_models": 261,
+ "cny_models": 76,
  "currency_map": {
-  "CNY": 81,
-  "USD": 213
+  "CNY": 76,
+  "USD": 212
  }
 }
