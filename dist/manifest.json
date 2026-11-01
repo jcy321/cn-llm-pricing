@@ -1,5 +1,5 @@
 {
- "built_at_utc": "2026-10-31T01:11:41.297041+00:00",
+ "built_at_utc": "2026-11-01T00:32:34.706910+00:00",
  "rate": 7.3,
  "sources": {
   "usd:zai": {
@@ -43,8 +43,8 @@
    "kept": 34
   },
   "usd:xai": {
-   "fetched": 8,
-   "kept": 8
+   "fetched": 9,
+   "kept": 9
   },
   "usd:mistral": {
    "fetched": 34,
@@ -83,10 +83,10 @@
    "skipped_dup": 4
   }
  },
- "usd_models": 262,
+ "usd_models": 263,
  "cny_models": 75,
  "currency_map": {
   "CNY": 75,
-  "USD": 214
+  "USD": 215
  }
 }
