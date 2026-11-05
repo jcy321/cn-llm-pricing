@@ -1,5 +1,5 @@
 {
- "built_at_utc": "2026-11-04T01:44:54.211395+00:00",
+ "built_at_utc": "2026-11-05T01:53:20.093182+00:00",
  "rate": 7.3,
  "sources": {
   "usd:zai": {
@@ -79,8 +79,8 @@
    "skipped_dup": 0
   },
   "cny:aliyun": {
-   "built": 32,
-   "skipped_dup": 4
+   "built": 33,
+   "skipped_dup": 5
   }
  },
  "usd_models": 263,
